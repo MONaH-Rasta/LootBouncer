@@ -5,7 +5,7 @@ using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
-    [Info("Loot Bouncer", "Sorrow/Arainrr", "1.0.1")]
+    [Info("Loot Bouncer", "Sorrow/Arainrr", "1.0.2")]
     [Description("Empty the containers when players do not pick up all the items")]
     internal class LootBouncer : RustPlugin
     {
@@ -71,9 +71,9 @@ namespace Oxide.Plugins
                             lootContainer.Die();
                         }));
                     }
-                    CheckJunkPile(lootContainer);
                 }
                 else entityPlayers[entityId].Remove(player.userID);
+                EmptyJunkPile(lootContainer);
                 lootEntities.Remove(entityId);
             }
         }
@@ -100,11 +100,11 @@ namespace Oxide.Plugins
                         barrel.Die();
                     }));
                 }
-                CheckJunkPile(barrel);
+                EmptyJunkPile(barrel);
             }
         }
 
-        private void CheckJunkPile(LootContainer lootContainer)
+        private void EmptyJunkPile(LootContainer lootContainer)
         {
             if (configData.emptyJunkpile)
             {
