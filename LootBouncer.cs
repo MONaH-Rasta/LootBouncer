@@ -9,7 +9,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("Loot Bouncer", "Sorrow/Arainrr", "1.0.9")]
+    [Info("Loot Bouncer", "Sorrow/Arainrr", "1.0.10")]
     [Description("Empty the containers when players do not pick up all the items")]
     public class LootBouncer : RustPlugin
     {
@@ -18,9 +18,9 @@ namespace Oxide.Plugins
         [PluginReference]
         private Plugin Slap, Trade;
 
-        private readonly Dictionary<uint, int> _lootEntities = new Dictionary<uint, int>();
-        private readonly Dictionary<uint, HashSet<ulong>> _entityPlayers = new Dictionary<uint, HashSet<ulong>>();
-        private readonly Dictionary<uint, Timer> _lootDestroyTimer = new Dictionary<uint, Timer>();
+        private readonly Dictionary<ulong, int> _lootEntities = new Dictionary<ulong, int>();
+        private readonly Dictionary<ulong, HashSet<ulong>> _entityPlayers = new Dictionary<ulong, HashSet<ulong>>();
+        private readonly Dictionary<ulong, Timer> _lootDestroyTimer = new Dictionary<ulong, Timer>();
 
         #endregion Fields
 
@@ -71,7 +71,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var entityID = lootContainer.net.ID;
+            var entityID = lootContainer.net.ID.Value;
             if (!_lootEntities.ContainsKey(entityID))
             {
                 _lootEntities.Add(entityID, lootContainer.inventory.itemList.Count);
@@ -103,7 +103,7 @@ namespace Oxide.Plugins
             {
                 return;
             }
-            var entityID = lootContainer.net.ID;
+            var entityID = lootContainer.net.ID.Value;
             HashSet<ulong> looters;
             if (!(lootContainer.inventory?.itemList?.Count > 0))
             {
@@ -155,7 +155,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var barrelID = barrel.net.ID;
+            var barrelID = barrel.net.ID.Value;
             HashSet<ulong> attackers;
             if (_entityPlayers.TryGetValue(barrelID, out attackers))
             {
@@ -190,7 +190,7 @@ namespace Oxide.Plugins
             }
 
             HashSet<ulong> attackers;
-            if (!_entityPlayers.TryGetValue(barrel.net.ID, out attackers))
+            if (!_entityPlayers.TryGetValue(barrel.net.ID.Value, out attackers))
             {
                 return;
             }
@@ -203,7 +203,7 @@ namespace Oxide.Plugins
             {
                 return;
             }
-            var entityID = lootContainer.net.ID;
+            var entityID = lootContainer.net.ID.Value;
             _lootEntities.Remove(entityID);
 
             Timer value;
@@ -281,11 +281,11 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (_lootDestroyTimer.ContainsKey(junkPile.net.ID))
+            if (_lootDestroyTimer.ContainsKey(junkPile.net.ID.Value))
             {
                 return;
             }
-            _lootDestroyTimer.Add(junkPile.net.ID, timer.Once(configData.timeBeforeJunkpileEmpty, () =>
+            _lootDestroyTimer.Add(junkPile.net.ID.Value, timer.Once(configData.timeBeforeJunkpileEmpty, () =>
             {
                 if (junkPile != null && !junkPile.IsDestroyed)
                 {
