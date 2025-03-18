@@ -1,22 +1,24 @@
-﻿using Oxide.Core.Plugins;
+﻿using Oxide.Core.Libraries.Covalence;
+using Oxide.Core.Plugins;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
 namespace Oxide.Plugins
 {
-    [Info("Loot Bouncer", "Sorrow", "0.2.2")]
+    [Info("Loot Bouncer", "Sorrow", "0.3.0")]
     [Description("Empty the containers when players do not pick up all the items")]
 
     class LootBouncer : RustPlugin
     {
         [PluginReference]
-        Plugin Trade;
+        Plugin Slap, Trade;
 
         Dictionary<uint, int> lootEntity = new Dictionary<uint, int>();
         private float _timeBeforeLootDespawn;
         private bool _emptyAirdrop;
         private bool _emptyCrashsite;
+        private bool _slapPlayer;
 
         private void OnLootEntity(BasePlayer player, BaseEntity entity)
         {
@@ -52,6 +54,8 @@ namespace Oxide.Plugins
             {
                 if (loot.inventory.itemList.Count < originalValue)
                 {
+                    if (loot.inventory.itemList.Count == 0) return;
+                    if (Slap != null && _slapPlayer) Slap.Call("SlapPlayer", player.IPlayer);
                     timer.Once(_timeBeforeLootDespawn, () =>
                     {
                         if (loot == null) return;
@@ -71,6 +75,7 @@ namespace Oxide.Plugins
             Config["Time before the loot containers are empties"] = 30;
             Config["Empty the airdrops"] = false;
             Config["Empty the crates of the crashsites"] = false;
+            Config["Slaps players who don't empty containers"] = false;
 
             SaveConfig();
         }
@@ -80,6 +85,12 @@ namespace Oxide.Plugins
             _timeBeforeLootDespawn = Convert.ToInt32(Config["Time before the loot containers are empties"]);
             _emptyAirdrop = Convert.ToBoolean(Config["Empty the airdrops"]);
             _emptyCrashsite = Convert.ToBoolean(Config["Empty the crates of the crashsites"]);
+            _slapPlayer = Convert.ToBoolean(Config["Slaps players who don't empty containers"]);
+
+            if (Slap == null && _slapPlayer)
+            {
+                PrintWarning("Slap is not loaded, get it at https://umod.org");
+            }
         }
     }
 }
