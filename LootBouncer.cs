@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Oxide.Plugins
 {
-    [Info("Loot Bouncer", "Sorrow", "0.1.0")]
+    [Info("Loot Bouncer", "Sorrow", "0.1.1")]
     [Description("Empty the containers when players do not pick up all the items")]
 
     class LootBouncer : RustPlugin
@@ -13,7 +13,7 @@ namespace Oxide.Plugins
 
         void OnLootEntity(BasePlayer player, BaseEntity entity)
         {
-            if (entity == null || player == null || !player.IsAdmin) return;
+            if (entity == null || player == null) return;
 
             var entityId = entity.net.ID;
             var loot = entity.GetComponent<LootContainer>();
@@ -23,7 +23,7 @@ namespace Oxide.Plugins
 
         private void OnLootEntityEnd(BasePlayer player, BaseEntity entity)
         {
-            if (entity == null || player == null || !player.IsAdmin) return;
+            if (entity == null || player == null) return;
 
             var entityId = entity.net.ID;
             var loot = entity.GetComponent<LootContainer>();
