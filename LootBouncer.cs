@@ -5,7 +5,7 @@ using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
-    [Info("Loot Bouncer", "Sorrow/Arainrr", "1.0.0")]
+    [Info("Loot Bouncer", "Sorrow/Arainrr", "1.0.1")]
     [Description("Empty the containers when players do not pick up all the items")]
     internal class LootBouncer : RustPlugin
     {
@@ -32,7 +32,8 @@ namespace Oxide.Plugins
         private void OnLootEntity(BasePlayer player, LootContainer lootContainer)
         {
             if (lootContainer?.net == null || player == null) return;
-            if (Trade != null && Trade.Call<bool>("IsTradeBox", lootContainer)) return;
+            var result = Trade?.Call("IsTradeBox", lootContainer);
+            if (result != null && result is bool && (bool)result) return;
             if (lootContainer?.inventory?.itemList == null || lootContainer?.SpawnType == null) return;
 
             if (LootContainer.spawnType.AIRDROP.Equals(lootContainer.SpawnType) && !configData.emptyAirdrop) return;
