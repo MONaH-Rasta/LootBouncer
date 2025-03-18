@@ -1,14 +1,18 @@
-﻿using System;
+﻿using Oxide.Core.Plugins;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
 namespace Oxide.Plugins
 {
-    [Info("Loot Bouncer", "Sorrow", "0.2.1")]
+    [Info("Loot Bouncer", "Sorrow", "0.2.2")]
     [Description("Empty the containers when players do not pick up all the items")]
 
     class LootBouncer : RustPlugin
     {
+        [PluginReference]
+        Plugin Trade;
+
         Dictionary<uint, int> lootEntity = new Dictionary<uint, int>();
         private float _timeBeforeLootDespawn;
         private bool _emptyAirdrop;
@@ -17,6 +21,7 @@ namespace Oxide.Plugins
         private void OnLootEntity(BasePlayer player, BaseEntity entity)
         {
             if (entity == null || player == null) return;
+            if (Trade != null && Trade.Call<bool>("IsTradeBox", entity)) return;
 
             var entityId = entity.net.ID;
             var loot = entity.GetComponent<LootContainer>();
@@ -36,6 +41,7 @@ namespace Oxide.Plugins
         private void OnLootEntityEnd(BasePlayer player, BaseEntity entity)
         {
             if (entity == null || player == null) return;
+            if (Trade != null && Trade.Call<bool>("IsTradeBox", entity)) return;
 
             var entityId = entity.net.ID;
             var loot = entity.GetComponent<LootContainer>();
