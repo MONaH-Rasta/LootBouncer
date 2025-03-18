@@ -1,22 +1,25 @@
-﻿using Oxide.Core.Plugins;
-using System;
+﻿using Newtonsoft.Json;
+using Oxide.Core.Plugins;
 using System.Collections.Generic;
 
 namespace Oxide.Plugins
 {
-    [Info("Loot Bouncer", "Sorrow", "0.3.2")]
+    [Info("Loot Bouncer", "Sorrow/Arainrr", "0.4.0")]
     [Description("Empty the containers when players do not pick up all the items")]
-
-    class LootBouncer : RustPlugin
+    internal class LootBouncer : RustPlugin
     {
         [PluginReference]
-        Plugin Slap, Trade;
+        private Plugin Slap, Trade;
 
         private readonly Dictionary<uint, int> _lootEntity = new Dictionary<uint, int>();
-        private float _timeBeforeLootDespawn;
-        private bool _emptyAirdrop;
-        private bool _emptyCrashsite;
-        private bool _slapPlayer;
+        private readonly List<string> _barrels = new List<string>
+        {
+            "loot-barrel-1",
+            "loot-barrel-2",
+            "oil_barrel",
+            "loot_barrel_1",
+            "loot_barrel_2",
+        };
 
         private void OnLootEntity(BasePlayer player, BaseEntity entity)
         {
@@ -25,7 +28,8 @@ namespace Oxide.Plugins
 
             var entityId = entity.net.ID;
             var loot = entity.GetComponent<LootContainer>();
-            if (loot == null || LootContainer.spawnType.AIRDROP.Equals(loot.SpawnType) && !_emptyAirdrop || LootContainer.spawnType.CRASHSITE.Equals(loot.SpawnType) && !_emptyCrashsite) return;
+            if (loot == null || LootContainer.spawnType.AIRDROP.Equals(loot.SpawnType) && !_config._emptyAirdrop || LootContainer.spawnType.CRASHSITE.Equals(loot.SpawnType) && !_config._emptyCrashsite) return;
+            if (loot is HackableLockedCrate && !_config._emptyHackableCrate) return;
 
             var originalValue = 0;
             if (!_lootEntity.TryGetValue(entityId, out originalValue))
@@ -42,47 +46,147 @@ namespace Oxide.Plugins
             if (entity.net == null) return;
             var entityId = entity.net.ID;
             var loot = entity.GetComponent<LootContainer>();
-            if (loot == null || LootContainer.spawnType.AIRDROP.Equals(loot.SpawnType) && !_emptyAirdrop || LootContainer.spawnType.CRASHSITE.Equals(loot.SpawnType) && !_emptyCrashsite) return;
+            if (loot == null || LootContainer.spawnType.AIRDROP.Equals(loot.SpawnType) && !_config._emptyAirdrop || LootContainer.spawnType.CRASHSITE.Equals(loot.SpawnType) && !_config._emptyCrashsite) return;
+            if (loot is HackableLockedCrate && !_config._emptyHackableCrate) return;
 
             var originalValue = 0;
             if (!_lootEntity.TryGetValue(entityId, out originalValue)) return;
             if (loot.inventory.itemList.Count < originalValue)
             {
                 if (loot.inventory.itemList.Count == 0) return;
-                if (Slap != null && _slapPlayer) Slap.Call("SlapPlayer", player.IPlayer);
-                timer.Once(_timeBeforeLootDespawn, () =>
+                timer.Once(_config._timeBeforeLootDespawn, () =>
                 {
+                    if (loot?.inventory == null) return;
                     DropUtil.DropItems(loot?.inventory, loot.transform.position);
-                    BaseNetworkable.serverEntities.Find(entityId)?.Kill();
+                    loot.Kill(BaseNetworkable.DestroyMode.Gib);
+					if (Slap != null && _config._slapPlayer)
+					{
+						Slap.Call("SlapPlayer", player.IPlayer);
+						Player.Message(player, lang.GetMessage("Container slap", this, player.UserIDString), $"<color={_config.PrefixColor}>{_config.Prefix}</color>", _config.SteamIDIcon);
+					}
                 });
             }
             _lootEntity.Remove(entityId);
         }
 
-        private new void LoadDefaultConfig()
+        private void OnPlayerAttack(BasePlayer attacker, HitInfo info)
         {
-            PrintWarning("Creating a new configuration file");
-            Config.Clear();
-
-            Config["Time before the loot containers are empties"] = 30;
-            Config["Empty the airdrops"] = false;
-            Config["Empty the crates of the crashsites"] = false;
-            Config["Slaps players who don't empty containers"] = false;
-
-            SaveConfig();
+            if (attacker == null || info?.HitEntity == null) return;
+            if (attacker.IsNpc) return;
+            if (_barrels.Contains(info.HitEntity.ShortPrefabName))
+            {
+                if (info.HitEntity != null && !info.HitEntity.IsDestroyed)
+                {
+                    LootContainer barrel = info.HitEntity as LootContainer;
+                    if (barrel == null) return;
+                    timer.Once(_config._timeBeforeLootDespawn, () =>
+                    {
+                        if (barrel == null) return;
+                        DropUtil.DropItems(barrel.inventory, barrel.transform.position);
+                        barrel.Kill(BaseNetworkable.DestroyMode.Gib);
+						if (Slap != null && _config._slapPlayer)
+						{
+							Slap.Call("SlapPlayer", attacker.IPlayer);
+							Player.Message(attacker, lang.GetMessage("Barrel slap", this, attacker.UserIDString), $"<color={_config.PrefixColor}>{_config.Prefix}</color>", _config.SteamIDIcon);
+						}
+                    });
+                }
+            }
         }
 
         private void OnServerInitialized()
         {
-            _timeBeforeLootDespawn = Convert.ToInt32(Config["Time before the loot containers are empties"]);
-            _emptyAirdrop = Convert.ToBoolean(Config["Empty the airdrops"]);
-            _emptyCrashsite = Convert.ToBoolean(Config["Empty the crates of the crashsites"]);
-            _slapPlayer = Convert.ToBoolean(Config["Slaps players who don't empty containers"]);
-
-            if (Slap == null && _slapPlayer)
+            if (Slap == null && _config._slapPlayer)
             {
                 PrintWarning("Slap is not loaded, get it at https://umod.org");
             }
+            if (!_config._emptyBarrel)
+            {
+                Unsubscribe(nameof(OnPlayerAttack));
+            }
         }
+
+        #region Configuration
+
+        private ConfigFile _config;
+
+        private class ConfigFile
+        {
+            [JsonProperty(PropertyName = "Time before the loot containers are empties")]
+            public float _timeBeforeLootDespawn { get; set; } = 30f;
+
+            [JsonProperty(PropertyName = "Empty the airdrops")]
+            public bool _emptyAirdrop { get; set; } = false;
+
+            [JsonProperty(PropertyName = "Empty the crates of the crashsites")]
+            public bool _emptyCrashsite { get; set; } = false;
+
+            [JsonProperty(PropertyName = "Slaps players who don't empty containers")]
+            public bool _slapPlayer { get; set; } = false;
+
+            [JsonProperty(PropertyName = "Empty the hackable crates")]
+            public bool _emptyHackableCrate { get; set; } = false;
+
+            [JsonProperty(PropertyName = "Empty the barrel")]
+            public bool _emptyBarrel { get; set; } = false;
+            [JsonProperty(PropertyName = "Prefix")]
+            public string Prefix { get; set; } = "[LootBouncer]:";
+
+            [JsonProperty(PropertyName = "Prefix color")]
+            public string PrefixColor { get; set; } = "#00FFFF";
+
+            [JsonProperty(PropertyName = "SteamID icon")]
+            public ulong SteamIDIcon { get; set; } = 0;
+
+
+            public static ConfigFile DefaultConfig()
+            {
+                return new ConfigFile();
+            }
+        }
+
+        protected override void LoadConfig()
+        {
+            base.LoadConfig();
+            try
+            {
+                _config = Config.ReadObject<ConfigFile>();
+                if (_config == null)
+                {
+                    LoadDefaultConfig();
+                }
+            }
+            catch
+            {
+                PrintError("Config has corrupted or incorrectly formatted");
+                return;
+            }
+            SaveConfig();
+        }
+
+        protected override void LoadDefaultConfig()
+        {
+            _config = ConfigFile.DefaultConfig();
+            PrintWarning("Creating a new configuration file");
+        }
+
+        protected override void SaveConfig()
+        {
+            Config.WriteObject(_config);
+        }
+
+        #endregion Configuration
+        #region Language
+
+        protected override void LoadDefaultMessages()
+        {
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                ["Container slap"] = "You didn't empty the container. Slap you in the face",
+                ["Barrel slap"] = "You didn't killed the barrel. Slap you in the face"
+            }, this);
+        }
+
+        #endregion Language
     }
 }
