@@ -1,12 +1,13 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using Newtonsoft.Json;
 using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
-    [Info("Loot Bouncer", "Sorrow/Arainrr", "1.0.4")]
+    [Info("Loot Bouncer", "Sorrow/Arainrr", "1.0.5")]
     [Description("Empty the containers when players do not pick up all the items")]
-    internal class LootBouncer : RustPlugin
+    public class LootBouncer : RustPlugin
     {
         [PluginReference] private readonly Plugin Slap, Trade;
         private readonly Dictionary<uint, int> lootEntities = new Dictionary<uint, int>();
@@ -15,164 +16,176 @@ namespace Oxide.Plugins
 
         private void OnServerInitialized()
         {
-            UpdateSettings();
+            UpdateConfig();
             if (configData.slapPlayer && Slap == null)
                 PrintError("Slap is not loaded, get it at https://umod.org/plugins/slap");
         }
 
-        private void UpdateSettings()
+        private void UpdateConfig()
         {
-            foreach (var entityPrefab in GameManifest.Current.entities)
+            foreach (var prefab in GameManifest.Current.entities)
             {
-                var lootContainer = GameManager.server.FindPrefab(entityPrefab.ToLower())?.GetComponent<LootContainer>();
-                if (lootContainer != null && !string.IsNullOrEmpty(lootContainer.ShortPrefabName) && !configData.lootContainerSettings.ContainsKey(lootContainer.ShortPrefabName))
-                    configData.lootContainerSettings.Add(lootContainer.ShortPrefabName, lootContainer.ShortPrefabName.Contains("stocking") ? false : true);
+                var lootContainer = GameManager.server.FindPrefab(prefab.ToLower())?.GetComponent<LootContainer>();
+                if (lootContainer == null || string.IsNullOrEmpty(lootContainer.ShortPrefabName)) continue;
+                if (!configData.lootContainerS.ContainsKey(lootContainer.ShortPrefabName))
+                    configData.lootContainerS.Add(lootContainer.ShortPrefabName, !lootContainer.ShortPrefabName.Contains("stocking"));
             }
             SaveConfig();
         }
 
         private void Unload()
         {
-            foreach (var timer in lootDestroyTimer.Values)
-                timer?.Destroy();
+            foreach (var value in lootDestroyTimer.Values)
+                value?.Destroy();
         }
 
         private void OnLootEntity(BasePlayer player, LootContainer lootContainer)
         {
             if (lootContainer == null || lootContainer.net == null || player == null) return;
             var obj = Trade?.Call("IsTradeBox", lootContainer);
-            if (obj != null && obj is bool && (bool)obj) return;
-            if (configData.lootContainerSettings.ContainsKey(lootContainer.ShortPrefabName) && !configData.lootContainerSettings[lootContainer.ShortPrefabName]) return;
+            if (obj is bool && (bool)obj) return;
+            bool enabled;
+            if (configData.lootContainerS.TryGetValue(lootContainer.ShortPrefabName, out enabled) && !enabled) return;
 
             var entityID = lootContainer.net.ID;
             if (!lootEntities.ContainsKey(entityID)) lootEntities.Add(entityID, lootContainer.inventory.itemList.Count);
-            if (!entityPlayers.ContainsKey(entityID)) entityPlayers.Add(entityID, new HashSet<ulong> { player.userID });
-            else entityPlayers[entityID].Add(player.userID);
+
+            HashSet<ulong> playerIDs;
+            if (entityPlayers.TryGetValue(entityID, out playerIDs)) playerIDs.Add(player.userID);
+            else entityPlayers.Add(entityID, new HashSet<ulong> { player.userID });
         }
 
         private void OnLootEntityEnd(BasePlayer player, LootContainer lootContainer)
         {
             if (lootContainer == null || lootContainer.net == null || player == null) return;
             var entityID = lootContainer.net.ID;
-            if (lootContainer.inventory == null || lootContainer.inventory.itemList == null || lootContainer.inventory.itemList.Count <= 0)
+            HashSet<ulong> playerIDs;
+            if (!(lootContainer.inventory?.itemList?.Count > 0))
             {
                 lootEntities.Remove(entityID);
-                if (entityPlayers.ContainsKey(entityID)) entityPlayers[entityID].Remove(player.userID);
+                if (entityPlayers.TryGetValue(entityID, out playerIDs)) playerIDs.Remove(player.userID);
                 return;
             }
-            if (lootEntities.ContainsKey(entityID) && entityPlayers.ContainsKey(entityID))
+
+            int tempItemsCount;
+            if (lootEntities.TryGetValue(entityID, out tempItemsCount))
             {
-                if (lootContainer.inventory.itemList.Count < lootEntities[entityID])
+                lootEntities.Remove(entityID);
+                if (lootContainer.inventory.itemList.Count < tempItemsCount)
                 {
                     if (!lootDestroyTimer.ContainsKey(entityID))
                     {
-                        lootDestroyTimer.Add(entityID, timer.Once(configData.timeBeforeLootEmpty, () =>
-                        {
-                            if (lootContainer == null || lootContainer.IsDestroyed) return;
-                            lootContainer.DropItems();
-                            lootContainer.RemoveMe();
-                        }));
+                        lootDestroyTimer.Add(entityID, timer.Once(configData.timeBeforeLootEmpty, () => DropItems(lootContainer)));
                     }
                 }
-                else entityPlayers[entityID].Remove(player.userID);
-                lootEntities.Remove(entityID);
+                else if (entityPlayers.TryGetValue(entityID, out playerIDs))
+                {
+                    playerIDs.Remove(player.userID);
+                }
                 EmptyJunkPile(lootContainer);
             }
         }
 
         private void OnPlayerAttack(BasePlayer attacker, HitInfo info)
         {
-            if (attacker == null || info?.HitEntity == null) return;
-            if (attacker.IsNpc || !attacker.userID.IsSteamId()) return;
-            if (!info.HitEntity.ShortPrefabName.Contains("barrel")) return;
-            if (configData.lootContainerSettings.ContainsKey(info.HitEntity.ShortPrefabName) && !configData.lootContainerSettings[info.HitEntity.ShortPrefabName]) return;
-            var barrel = info.HitEntity as LootContainer;
+            if (attacker == null || !attacker.userID.IsSteamId()) return;
+            var barrel = info?.HitEntity as LootContainer;
             if (barrel == null || barrel.net == null) return;
+            if (!barrel.ShortPrefabName.Contains("barrel")) return;
+            bool enabled;
+            if (configData.lootContainerS.TryGetValue(info.HitEntity.ShortPrefabName, out enabled) && !enabled) return;
 
             var barrelID = barrel.net.ID;
-            if (!entityPlayers.ContainsKey(barrelID)) entityPlayers.Add(barrelID, new HashSet<ulong> { attacker.userID });
-            else entityPlayers[barrelID].Add(attacker.userID);
+            HashSet<ulong> playerIDs;
+            if (entityPlayers.TryGetValue(barrelID, out playerIDs)) playerIDs.Add(attacker.userID);
+            else entityPlayers.Add(barrelID, new HashSet<ulong> { attacker.userID });
 
             if (!lootDestroyTimer.ContainsKey(barrelID))
             {
-                lootDestroyTimer.Add(barrelID, timer.Once(configData.timeBeforeLootEmpty, () =>
-                {
-                    if (barrel == null || barrel.IsDestroyed) return;
-                    barrel.DropItems();
-                    barrel.RemoveMe();
-                }));
+                lootDestroyTimer.Add(barrelID, timer.Once(configData.timeBeforeLootEmpty, () => DropItems(barrel)));
             }
             EmptyJunkPile(barrel);
+        }
+
+        private void OnEntityDeath(LootContainer lootContainer, HitInfo info)
+        {
+            if (lootContainer == null || lootContainer.net == null) return;
+            if (!lootContainer.ShortPrefabName.Contains("barrel")) return;
+            var attacker = info?.InitiatorPlayer;
+            if (attacker == null || !attacker.userID.IsSteamId()) return;
+
+            HashSet<ulong> playerIDs;
+            if (!entityPlayers.TryGetValue(lootContainer.net.ID, out playerIDs)) return;
+            playerIDs.Remove(attacker.userID);
         }
 
         private void OnEntityKill(LootContainer lootContainer)
         {
             if (lootContainer == null || lootContainer.net == null) return;
             var entityID = lootContainer.net.ID;
-            if (lootDestroyTimer.ContainsKey(entityID))
+
+            Timer value;
+            if (lootDestroyTimer.TryGetValue(entityID, out value))
             {
-                lootDestroyTimer[entityID]?.Destroy();
+                value?.Destroy();
                 lootDestroyTimer.Remove(entityID);
             }
-            if (!entityPlayers.ContainsKey(entityID)) return;
-            if (!configData.slapPlayer || Slap == null)
+
+            HashSet<ulong> playerIDs;
+            if (!entityPlayers.TryGetValue(entityID, out playerIDs)) return;
+            if (configData.slapPlayer && Slap != null)
             {
-                entityPlayers.Remove(entityID);
-                return;
-            }
-            foreach (var playerID in entityPlayers[entityID])
-            {
-                var player = BasePlayer.FindByID(playerID);
-                if (player == null || player.IPlayer == null) continue;
-                Slap.Call("SlapPlayer", player.IPlayer);
-                Print(player, Lang("SlapMessage", player.UserIDString));
+                foreach (var playerID in playerIDs)
+                {
+                    var player = BasePlayer.FindByID(playerID);
+                    if (player == null || player.IPlayer == null) continue;
+                    Slap.Call("SlapPlayer", player.IPlayer);
+                    Print(player, Lang("SlapMessage", player.UserIDString));
+                }
             }
             entityPlayers.Remove(entityID);
-        }
-
-        private void OnEntityDeath(LootContainer lootContainer, HitInfo info)
-        {
-            if (lootContainer == null || lootContainer.net == null || info?.InitiatorPlayer == null) return;
-            if (!lootContainer.ShortPrefabName.Contains("barrel")) return;
-            var barrelID = lootContainer.net.ID;
-            if (!entityPlayers.ContainsKey(barrelID)) return;
-            var attacker = info.InitiatorPlayer;
-            if (attacker.IsNpc || !attacker.userID.IsSteamId()) return;
-            entityPlayers[barrelID].Remove(attacker.userID);
         }
 
         private void EmptyJunkPile(LootContainer lootContainer)
         {
             if (!configData.emptyJunkpile) return;
+            var spawnGroup = lootContainer.GetComponent<SpawnPointInstance>()?.parentSpawnGroup;
+            if (spawnGroup == null) return;
+
             var junkPiles = Facepunch.Pool.GetList<JunkPile>();
-            Vis.Entities(lootContainer.transform.position, 6f, junkPiles);
-            foreach (var junkPile in junkPiles)
-            {
-                if (junkPile != null && junkPile.net != null)
-                {
-                    var junkPileID = junkPile.net.ID;
-                    if (!lootDestroyTimer.ContainsKey(junkPileID))
-                    {
-                        lootDestroyTimer.Add(junkPileID, timer.Once(configData.timeBeforeJunkpileEmpty, () =>
-                        {
-                            if (junkPile != null && !junkPile.IsDestroyed)
-                            {
-                                if (configData.dropNearbyLoot)
-                                {
-                                    var lootContainers = Facepunch.Pool.GetList<LootContainer>();
-                                    Vis.Entities(junkPile.transform.position, 6f, lootContainers);
-                                    foreach (var loot in lootContainers)
-                                        DropUtil.DropItems(loot.inventory, loot.transform.position);
-                                    Facepunch.Pool.FreeList(ref lootContainers);
-                                }
-                                junkPile.SinkAndDestroy();
-                            }
-                        }));
-                    }
-                    break;
-                }
-            }
+            Vis.Entities(lootContainer.transform.position, 10f, junkPiles);
+            var junkPile = junkPiles.FirstOrDefault(x => x.spawngroups.Contains(spawnGroup));
+            var flag = junkPile == null || junkPile.net == null;
             Facepunch.Pool.FreeList(ref junkPiles);
+            if (flag) return;
+
+            if (lootDestroyTimer.ContainsKey(junkPile.net.ID)) return;
+            lootDestroyTimer.Add(junkPile.net.ID, timer.Once(configData.timeBeforeJunkpileEmpty, () =>
+            {
+                if (junkPile != null && !junkPile.IsDestroyed)
+                {
+                    if (configData.dropNearbyLoot)
+                    {
+                        var lootContainers = Facepunch.Pool.GetList<LootContainer>();
+                        Vis.Entities(junkPile.transform.position, 10f, lootContainers);
+                        foreach (var loot in lootContainers)
+                        {
+                            var lootSpawnGroup = loot.GetComponent<SpawnPointInstance>()?.parentSpawnGroup;
+                            if (lootSpawnGroup != null && junkPile.spawngroups.Contains(lootSpawnGroup))
+                                DropUtil.DropItems(loot.inventory, loot.transform.position);
+                        }
+                        Facepunch.Pool.FreeList(ref lootContainers);
+                    }
+                    junkPile.SinkAndDestroy();
+                }
+            }));
+        }
+
+        private static void DropItems(LootContainer lootContainer)
+        {
+            if (lootContainer == null || lootContainer.IsDestroyed) return;
+            DropUtil.DropItems(lootContainer.inventory, lootContainer.GetDropPosition());
+            lootContainer.RemoveMe();
         }
 
         #region ConfigurationFile
@@ -206,7 +219,7 @@ namespace Oxide.Plugins
             public ulong steamIDIcon = 0;
 
             [JsonProperty(PropertyName = "Loot container settings")]
-            public Dictionary<string, bool> lootContainerSettings = new Dictionary<string, bool>();
+            public Dictionary<string, bool> lootContainerS = new Dictionary<string, bool>();
         }
 
         protected override void LoadConfig()
