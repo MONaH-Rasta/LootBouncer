@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace Oxide.Plugins
 {
-    [Info("Loot Bouncer", "Sorrow", "0.3.1")]
+    [Info("Loot Bouncer", "Sorrow", "0.3.2")]
     [Description("Empty the containers when players do not pick up all the items")]
 
     class LootBouncer : RustPlugin
@@ -12,7 +12,7 @@ namespace Oxide.Plugins
         [PluginReference]
         Plugin Slap, Trade;
 
-        Dictionary<uint, int> lootEntity = new Dictionary<uint, int>();
+        private readonly Dictionary<uint, int> _lootEntity = new Dictionary<uint, int>();
         private float _timeBeforeLootDespawn;
         private bool _emptyAirdrop;
         private bool _emptyCrashsite;
@@ -28,13 +28,9 @@ namespace Oxide.Plugins
             if (loot == null || LootContainer.spawnType.AIRDROP.Equals(loot.SpawnType) && !_emptyAirdrop || LootContainer.spawnType.CRASHSITE.Equals(loot.SpawnType) && !_emptyCrashsite) return;
 
             var originalValue = 0;
-            if (lootEntity.TryGetValue(entityId, out originalValue))
+            if (!_lootEntity.TryGetValue(entityId, out originalValue))
             {
-                originalValue = loot.inventory.itemList.Count;
-            }
-            else
-            {
-                lootEntity.Add(entityId, loot.inventory.itemList.Count);
+                _lootEntity.Add(entityId, loot.inventory.itemList.Count);
             }
         }
 
@@ -49,21 +45,18 @@ namespace Oxide.Plugins
             if (loot == null || LootContainer.spawnType.AIRDROP.Equals(loot.SpawnType) && !_emptyAirdrop || LootContainer.spawnType.CRASHSITE.Equals(loot.SpawnType) && !_emptyCrashsite) return;
 
             var originalValue = 0;
-            if (lootEntity.TryGetValue(entityId, out originalValue))
+            if (!_lootEntity.TryGetValue(entityId, out originalValue)) return;
+            if (loot.inventory.itemList.Count < originalValue)
             {
-                if (loot.inventory.itemList.Count < originalValue)
+                if (loot.inventory.itemList.Count == 0) return;
+                if (Slap != null && _slapPlayer) Slap.Call("SlapPlayer", player.IPlayer);
+                timer.Once(_timeBeforeLootDespawn, () =>
                 {
-                    if (loot.inventory.itemList.Count == 0) return;
-                    if (Slap != null && _slapPlayer) Slap.Call("SlapPlayer", player.IPlayer);
-                    timer.Once(_timeBeforeLootDespawn, () =>
-                    {
-                        if (loot == null) return;
-                        DropUtil.DropItems(loot?.inventory, loot.transform.position);
-                        BaseNetworkable.serverEntities.Find(entityId)?.Kill();
-                    });
-                }
-                lootEntity.Remove(entityId);
+                    DropUtil.DropItems(loot?.inventory, loot.transform.position);
+                    BaseNetworkable.serverEntities.Find(entityId)?.Kill();
+                });
             }
+            _lootEntity.Remove(entityId);
         }
 
         private new void LoadDefaultConfig()
