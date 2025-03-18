@@ -4,15 +4,15 @@ using System.Collections.Generic;
 
 namespace Oxide.Plugins
 {
-    [Info("Loot Bouncer", "Sorrow/Arainrr", "0.4.0")]
+    [Info("Loot Bouncer", "Sorrow/Arainrr", "0.5.0")]
     [Description("Empty the containers when players do not pick up all the items")]
     internal class LootBouncer : RustPlugin
     {
-        [PluginReference]
-        private Plugin Slap, Trade;
+        [PluginReference] private Plugin Slap, Trade;
 
-        private readonly Dictionary<uint, int> _lootEntity = new Dictionary<uint, int>();
-        private readonly List<string> _barrels = new List<string>
+        private readonly Dictionary<uint, int> lootEntities = new Dictionary<uint, int>();
+
+        private readonly List<string> barrels = new List<string>
         {
             "loot-barrel-1",
             "loot-barrel-2",
@@ -23,126 +23,110 @@ namespace Oxide.Plugins
 
         private void OnLootEntity(BasePlayer player, BaseEntity entity)
         {
-            if (entity == null || player == null) return;
+            if (entity?.net == null || player == null) return;
             if (Trade != null && Trade.Call<bool>("IsTradeBox", entity)) return;
+            if (entity.net == null) return;
+            var loot = entity.GetComponent<LootContainer>();
+            if (loot?.inventory?.itemList == null || loot?.SpawnType == null) return;
+            if (LootContainer.spawnType.AIRDROP.Equals(loot.SpawnType) && !configData.emptyAirdrop) return;
+            if (LootContainer.spawnType.CRASHSITE.Equals(loot.SpawnType) && !configData.emptyCrashsite) return;
+            if (loot is HackableLockedCrate && !configData.emptyHackableCrate) return;
 
             var entityId = entity.net.ID;
-            var loot = entity.GetComponent<LootContainer>();
-            if (loot == null || LootContainer.spawnType.AIRDROP.Equals(loot.SpawnType) && !_config._emptyAirdrop || LootContainer.spawnType.CRASHSITE.Equals(loot.SpawnType) && !_config._emptyCrashsite) return;
-            if (loot is HackableLockedCrate && !_config._emptyHackableCrate) return;
-
-            var originalValue = 0;
-            if (!_lootEntity.TryGetValue(entityId, out originalValue))
-            {
-                _lootEntity.Add(entityId, loot.inventory.itemList.Count);
-            }
+            if (!lootEntities.ContainsKey(entityId))
+                lootEntities.Add(entityId, loot.inventory.itemList.Count);
         }
 
         private void OnLootEntityEnd(BasePlayer player, BaseEntity entity)
         {
-            if (entity == null || player == null) return;
+            if (entity?.net == null || player == null) return;
             if (Trade != null && Trade.Call<bool>("IsTradeBox", entity)) return;
-
-            if (entity.net == null) return;
-            var entityId = entity.net.ID;
             var loot = entity.GetComponent<LootContainer>();
-            if (loot == null || LootContainer.spawnType.AIRDROP.Equals(loot.SpawnType) && !_config._emptyAirdrop || LootContainer.spawnType.CRASHSITE.Equals(loot.SpawnType) && !_config._emptyCrashsite) return;
-            if (loot is HackableLockedCrate && !_config._emptyHackableCrate) return;
-
-            var originalValue = 0;
-            if (!_lootEntity.TryGetValue(entityId, out originalValue)) return;
-            if (loot.inventory.itemList.Count < originalValue)
+            if (loot?.inventory?.itemList == null || loot?.SpawnType == null) return;
+            if (loot.inventory.itemList.Count == 0) return;
+            var entityId = entity.net.ID;
+            if (!lootEntities.ContainsKey(entityId)) return;
+            if (loot.inventory.itemList.Count < lootEntities[entityId])
             {
-                if (loot.inventory.itemList.Count == 0) return;
-                timer.Once(_config._timeBeforeLootDespawn, () =>
+                timer.Once(configData.timeBeforeLootDespawn, () =>
                 {
-                    if (loot?.inventory == null) return;
-                    DropUtil.DropItems(loot?.inventory, loot.transform.position);
+                    if (loot?.inventory?.itemList == null) return;
+                    DropUtil.DropItems(loot.inventory, loot.transform.position);
                     loot.Kill(BaseNetworkable.DestroyMode.Gib);
-					if (Slap != null && _config._slapPlayer)
-					{
-						Slap.Call("SlapPlayer", player.IPlayer);
-						Player.Message(player, lang.GetMessage("Container slap", this, player.UserIDString), $"<color={_config.PrefixColor}>{_config.Prefix}</color>", _config.SteamIDIcon);
-					}
+                    if (Slap != null && configData.slapPlayer)
+                    {
+                        if (player?.IPlayer == null) return;
+                        Slap.Call("SlapPlayer", player.IPlayer);
+                        Print(player, Lang("Container slap", player.UserIDString));
+                    }
                 });
             }
-            _lootEntity.Remove(entityId);
+            lootEntities.Remove(entityId);
         }
 
         private void OnPlayerAttack(BasePlayer attacker, HitInfo info)
         {
             if (attacker == null || info?.HitEntity == null) return;
             if (attacker.IsNpc) return;
-            if (_barrels.Contains(info.HitEntity.ShortPrefabName))
+            if (barrels.Contains(info.HitEntity.ShortPrefabName))
             {
-                if (info.HitEntity != null && !info.HitEntity.IsDestroyed)
+                var barrel = info.HitEntity as LootContainer;
+                if (barrel == null) return;
+                timer.Once(configData.timeBeforeLootDespawn, () =>
                 {
-                    LootContainer barrel = info.HitEntity as LootContainer;
-                    if (barrel == null) return;
-                    timer.Once(_config._timeBeforeLootDespawn, () =>
+                    if (barrel?.inventory?.itemList == null) return;
+                    DropUtil.DropItems(barrel.inventory, barrel.transform.position);
+                    barrel.Kill(BaseNetworkable.DestroyMode.Gib);
+                    if (Slap != null && configData.slapPlayer)
                     {
-                        if (barrel == null) return;
-                        DropUtil.DropItems(barrel.inventory, barrel.transform.position);
-                        barrel.Kill(BaseNetworkable.DestroyMode.Gib);
-						if (Slap != null && _config._slapPlayer)
-						{
-							Slap.Call("SlapPlayer", attacker.IPlayer);
-							Player.Message(attacker, lang.GetMessage("Barrel slap", this, attacker.UserIDString), $"<color={_config.PrefixColor}>{_config.Prefix}</color>", _config.SteamIDIcon);
-						}
-                    });
-                }
+                        if (attacker?.IPlayer == null) return;
+                        Slap.Call("SlapPlayer", attacker.IPlayer);
+                        Print(attacker, Lang("Barrel slap", attacker.UserIDString));
+                    }
+                });
             }
         }
 
         private void OnServerInitialized()
         {
-            if (Slap == null && _config._slapPlayer)
-            {
-                PrintWarning("Slap is not loaded, get it at https://umod.org");
-            }
-            if (!_config._emptyBarrel)
-            {
+            if (Slap == null && configData.slapPlayer)
+                PrintWarning("Slap is not loaded, get it at https://umod.org/plugins/slap");
+            if (!configData.emptyBarrel)
                 Unsubscribe(nameof(OnPlayerAttack));
-            }
         }
 
-        #region Configuration
+        #region ConfigurationFile
 
-        private ConfigFile _config;
+        private ConfigData configData;
 
-        private class ConfigFile
+        private class ConfigData
         {
             [JsonProperty(PropertyName = "Time before the loot containers are empties")]
-            public float _timeBeforeLootDespawn { get; set; } = 30f;
-
-            [JsonProperty(PropertyName = "Empty the airdrops")]
-            public bool _emptyAirdrop { get; set; } = false;
-
-            [JsonProperty(PropertyName = "Empty the crates of the crashsites")]
-            public bool _emptyCrashsite { get; set; } = false;
+            public float timeBeforeLootDespawn = 30f;
 
             [JsonProperty(PropertyName = "Slaps players who don't empty containers")]
-            public bool _slapPlayer { get; set; } = false;
+            public bool slapPlayer = false;
+
+            [JsonProperty(PropertyName = "Empty the crates of the crashsites")]
+            public bool emptyCrashsite = false;
 
             [JsonProperty(PropertyName = "Empty the hackable crates")]
-            public bool _emptyHackableCrate { get; set; } = false;
+            public bool emptyHackableCrate = false;
+
+            [JsonProperty(PropertyName = "Empty the airdrops")]
+            public bool emptyAirdrop = false;
 
             [JsonProperty(PropertyName = "Empty the barrel")]
-            public bool _emptyBarrel { get; set; } = false;
-            [JsonProperty(PropertyName = "Prefix")]
-            public string Prefix { get; set; } = "[LootBouncer]:";
+            public bool emptyBarrel = false;
 
-            [JsonProperty(PropertyName = "Prefix color")]
-            public string PrefixColor { get; set; } = "#00FFFF";
+            [JsonProperty(PropertyName = "Chat prefix")]
+            public string prefix = "[LootBouncer]:";
 
-            [JsonProperty(PropertyName = "SteamID icon")]
-            public ulong SteamIDIcon { get; set; } = 0;
+            [JsonProperty(PropertyName = "Chat prefix color")]
+            public string prefixColor = "#00FFFF";
 
-
-            public static ConfigFile DefaultConfig()
-            {
-                return new ConfigFile();
-            }
+            [JsonProperty(PropertyName = "Chat steamID icon")]
+            public ulong steamIDIcon = 0;
         }
 
         protected override void LoadConfig()
@@ -150,33 +134,29 @@ namespace Oxide.Plugins
             base.LoadConfig();
             try
             {
-                _config = Config.ReadObject<ConfigFile>();
-                if (_config == null)
-                {
+                configData = Config.ReadObject<ConfigData>();
+                if (configData == null)
                     LoadDefaultConfig();
-                }
             }
             catch
             {
-                PrintError("Config has corrupted or incorrectly formatted");
-                return;
+                PrintError("The configuration file is corrupted");
+                LoadDefaultConfig();
             }
             SaveConfig();
         }
 
         protected override void LoadDefaultConfig()
         {
-            _config = ConfigFile.DefaultConfig();
             PrintWarning("Creating a new configuration file");
+            configData = new ConfigData();
         }
 
-        protected override void SaveConfig()
-        {
-            Config.WriteObject(_config);
-        }
+        protected override void SaveConfig() => Config.WriteObject(configData);
 
-        #endregion Configuration
-        #region Language
+        #endregion ConfigurationFile
+
+        #region LanguageFile
 
         protected override void LoadDefaultMessages()
         {
@@ -187,6 +167,10 @@ namespace Oxide.Plugins
             }, this);
         }
 
-        #endregion Language
+        private string Lang(string key, string id = null, params object[] args) => string.Format(lang.GetMessage(key, this, id), args);
+
+        private void Print(BasePlayer player, string message) => Player.Message(player, message, $"<color={configData.prefixColor}>{configData.prefix}</color>", configData.steamIDIcon);
+
+        #endregion LanguageFile
     }
 }
