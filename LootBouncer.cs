@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace Oxide.Plugins
 {
-    [Info("Loot Bouncer", "Sorrow", "0.2.0")]
+    [Info("Loot Bouncer", "Sorrow", "0.2.1")]
     [Description("Empty the containers when players do not pick up all the items")]
 
     class LootBouncer : RustPlugin
@@ -14,14 +14,23 @@ namespace Oxide.Plugins
         private bool _emptyAirdrop;
         private bool _emptyCrashsite;
 
-        void OnLootEntity(BasePlayer player, BaseEntity entity)
+        private void OnLootEntity(BasePlayer player, BaseEntity entity)
         {
             if (entity == null || player == null) return;
 
             var entityId = entity.net.ID;
             var loot = entity.GetComponent<LootContainer>();
             if (loot == null || LootContainer.spawnType.AIRDROP.Equals(loot.SpawnType) && !_emptyAirdrop || LootContainer.spawnType.CRASHSITE.Equals(loot.SpawnType) && !_emptyCrashsite) return;
-            lootEntity.Add(entityId, loot.inventory.itemList.Count);
+
+            var originalValue = 0;
+            if (lootEntity.TryGetValue(entityId, out originalValue))
+            {
+                originalValue = loot.inventory.itemList.Count;
+            }
+            else
+            {
+                lootEntity.Add(entityId, loot.inventory.itemList.Count);
+            }
         }
 
         private void OnLootEntityEnd(BasePlayer player, BaseEntity entity)
@@ -53,7 +62,7 @@ namespace Oxide.Plugins
             PrintWarning("Creating a new configuration file");
             Config.Clear();
 
-            Config["Time before the loot despawn in seconds"] = 30;
+            Config["Time before the loot containers are empties"] = 30;
             Config["Empty the airdrops"] = false;
             Config["Empty the crates of the crashsites"] = false;
 
@@ -62,7 +71,7 @@ namespace Oxide.Plugins
 
         private void OnServerInitialized()
         {
-            _timeBeforeLootDespawn = Convert.ToInt32(Config["Time before the loot despawn in seconds"]);
+            _timeBeforeLootDespawn = Convert.ToInt32(Config["Time before the loot containers are empties"]);
             _emptyAirdrop = Convert.ToBoolean(Config["Empty the airdrops"]);
             _emptyCrashsite = Convert.ToBoolean(Config["Empty the crates of the crashsites"]);
         }
