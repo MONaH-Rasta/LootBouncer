@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Facepunch;
@@ -9,7 +9,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("Loot Bouncer", "Sorrow/Arainrr", "1.0.10")]
+    [Info("Loot Bouncer", "Sorrow/Arainrr", "1.0.11")]
     [Description("Empty the containers when players do not pick up all the items")]
     public class LootBouncer : RustPlugin
     {
@@ -271,11 +271,11 @@ namespace Oxide.Plugins
             {
                 return;
             }
-            var junkPiles = Pool.GetList<JunkPile>();
+            var junkPiles = Pool.Get<List<JunkPile>>();
             Vis.Entities(lootContainer.transform.position, 10f, junkPiles, Layers.Solid);
             var junkPile = junkPiles.FirstOrDefault(x => x.spawngroups.Contains(spawnGroup));
             var flag = junkPile == null || junkPile.net == null;
-            Pool.FreeList(ref junkPiles);
+            Pool.FreeUnmanaged(ref junkPiles);
             if (flag)
             {
                 return;
@@ -291,7 +291,7 @@ namespace Oxide.Plugins
                 {
                     if (configData.dropNearbyLoot)
                     {
-                        var lootContainers = Pool.GetList<LootContainer>();
+                        var lootContainers = Pool.Get<List<LootContainer>>();
                         Vis.Entities(junkPile.transform.position, 10f, lootContainers, Layers.Solid);
                         foreach (var loot in lootContainers)
                         {
@@ -301,7 +301,7 @@ namespace Oxide.Plugins
                                 DropItems(loot);
                             }
                         }
-                        Pool.FreeList(ref lootContainers);
+                        Pool.FreeUnmanaged(ref lootContainers);
                     }
                     junkPile.SinkAndDestroy();
                 }
